@@ -33,5 +33,23 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
 
 LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 {
+    switch (Message)
+    {
+    case WM_PAINT: {
+        PAINTSTRUCT Paint;
+        HDC DeviceContext = BeginPaint(Window, &Paint);
+
+        int X = Paint.rcPaint.left;
+        int Y = Paint.rcPaint.top;
+        int Width = Paint.rcPaint.right - X;
+        int Height = Paint.rcPaint.bottom - Y;
+
+        PatBlt(DeviceContext, X, Y, Width, Height, BLACKNESS);
+        EndPaint(Window, &Paint);
+    }
+    break;
+    default:
+        break;
+    }
     return DefWindowProc(Window, Message, WParam, LParam);
 }
