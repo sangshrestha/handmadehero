@@ -10,12 +10,15 @@ struct my_rect {
     int Height;
 };
 
-void *BitmapMemory;
-BITMAPINFO BitmapInfo;
-int BitmapHeight;
-int BitmapWidth;
+struct my_bitmap {
+    void *Memory;
+    BITMAPINFO Info;
+    int Height;
+    int Width;
+};
 
-int Global_Running = 1;
+int global_running = 1;
+struct my_bitmap global_bitmap;
 
 // Entry point
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
@@ -35,9 +38,26 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
         {
             ShowWindow(Window, SW_SHOWDEFAULT);
 
+            if (global_bitmap.Memory)
+            {
+                VirtualFree(global_bitmap.Memory, 0, MEM_RELEASE);
+            }
+
+            global_bitmap.Height = 720;
+            global_bitmap.Width = 1280;
+
+            global_bitmap.Info.bmiHeader.biSize = sizeof(global_bitmap.Info.bmiHeader);
+            global_bitmap.Info.bmiHeader.biWidth = global_bitmap.Width;
+            global_bitmap.Info.bmiHeader.biHeight = -global_bitmap.Height;
+            global_bitmap.Info.bmiHeader.biPlanes = 1;
+            global_bitmap.Info.bmiHeader.biBitCount = 32;
+            global_bitmap.Info.bmiHeader.biCompression = BI_RGB;
+            
+            global_bitmap.Memory = VirtualAlloc(0, global_bitmap.Width * global_bitmap.Height * 4, MEM_COMMIT, PAGE_READWRITE);
+
             int Xoffset = 0;
 
-            while (Global_Running)
+            while (global_running)
             {
                 MSG Message;
                 while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
@@ -46,11 +66,11 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
                     DispatchMessage(&Message);
                 }
 
-                struct my_rect rect = GetRect(Window);
+                struct my_rect Rect = GetRect(Window);
 
                 HDC DeviceContext = GetDC(Window);
                 PaintBitmap(Xoffset, 0);
-                StretchDIBits(DeviceContext, 0, 0, rect.Width, rect.Height, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+                StretchDIBits(DeviceContext, 0, 0, Rect.Width, Rect.Height, 0, 0, global_bitmap.Width, global_bitmap.Height, global_bitmap.Memory, &global_bitmap.Info, DIB_RGB_COLORS, SRCCOPY);
                 ReleaseDC(Window, DeviceContext);
                 Xoffset++;
             }
@@ -65,24 +85,6 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
     switch (Message) {
     case WM_SIZE:
     {
-        if (BitmapMemory)
-        {
-            VirtualFree(BitmapMemory, 0, MEM_RELEASE);
-        }
-
-        struct my_rect rect = GetRect(Window);
-
-        BitmapHeight = 720;
-        BitmapWidth = 1280;
-
-        BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-        BitmapInfo.bmiHeader.biWidth = BitmapWidth;
-        BitmapInfo.bmiHeader.biHeight = -BitmapHeight;
-        BitmapInfo.bmiHeader.biPlanes = 1;
-        BitmapInfo.bmiHeader.biBitCount = 32;
-        BitmapInfo.bmiHeader.biCompression = BI_RGB;
-        
-        BitmapMemory = VirtualAlloc(0, BitmapWidth * BitmapHeight * 4, MEM_COMMIT, PAGE_READWRITE);
     }
     break;
 
@@ -91,9 +93,9 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
         PAINTSTRUCT Paint;
         HDC DeviceContext = BeginPaint(Window, &Paint);
 
-        struct my_rect rect = GetRect(Window);
+        struct my_rect Rect = GetRect(Window);
 
-        StretchDIBits(DeviceContext, 0, 0, rect.Width, rect.Height, 0, 0, BitmapWidth, BitmapHeight, BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+        StretchDIBits(DeviceContext, 0, 0, Rect.Width, Rect.Height, 0, 0, global_bitmap.Width, global_bitmap.Height, global_bitmap.Memory, &global_bitmap.Info, DIB_RGB_COLORS, SRCCOPY);
         EndPaint(Window, &Paint);
     }
     break;
@@ -106,11 +108,11 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
 
 void PaintBitmap(int Xoffset, int Yoffset)
 {
-    uint32_t *Pixel = (uint32_t *)BitmapMemory;
+    uint32_t *Pixel = (uint32_t *)global_bitmap.Memory;
 
-    for (int Y = 0; Y < BitmapHeight; Y++)
+    for (int Y = 0; Y < global_bitmap.Height; Y++)
     {
-        for (int X = 0; X < BitmapWidth; X++)
+        for (int X = 0; X < global_bitmap.Width; X++)
         {
             uint8_t Red = (uint8_t) X + Xoffset;
             uint8_t Green = 0;
