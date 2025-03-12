@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <windows.h>
+#include <xinput.h>
 
 LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam);
 void PaintBitmap(int Xoffset, int Yoffset);
@@ -18,6 +19,8 @@ struct my_bitmap {
 };
 
 int global_running = 1;
+int Xoffset = 0;
+int Yoffset = 0;
 struct my_bitmap global_bitmap;
 
 // Entry point
@@ -55,7 +58,6 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
             
             global_bitmap.Memory = VirtualAlloc(0, global_bitmap.Width * global_bitmap.Height * 4, MEM_COMMIT, PAGE_READWRITE);
 
-            int Xoffset = 0;
 
             while (global_running)
             {
@@ -66,13 +68,29 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
                     DispatchMessage(&Message);
                 }
 
+                for (DWORD i = 0; i < XUSER_MAX_COUNT; i++)
+                {
+                    XINPUT_STATE Controller_State;
+
+                    if (XInputGetState(i, &Controller_State) == ERROR_SUCCESS)
+                    {
+                        int DPadLeft = Controller_State.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT;
+
+                        if (DPadLeft) 
+                        {
+                            Xoffset++;
+                        }
+                    }
+                    else 
+                    {
+                    }
+                }
                 struct my_rect Rect = GetRect(Window);
 
                 HDC DeviceContext = GetDC(Window);
-                PaintBitmap(Xoffset, 0);
+                PaintBitmap(Xoffset, Yoffset);
                 StretchDIBits(DeviceContext, 0, 0, Rect.Width, Rect.Height, 0, 0, global_bitmap.Width, global_bitmap.Height, global_bitmap.Memory, &global_bitmap.Info, DIB_RGB_COLORS, SRCCOPY);
                 ReleaseDC(Window, DeviceContext);
-                Xoffset++;
             }
         }
     }
@@ -83,11 +101,17 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
 LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 {
     switch (Message) {
-    case WM_SIZE:
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
     {
+        if (WParam == 'W')
+        {
+            Yoffset++;
+        }
     }
     break;
-
     case WM_PAINT: 
     {
         PAINTSTRUCT Paint;
@@ -100,10 +124,10 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
     }
     break;
     default:
+        return DefWindowProc(Window, Message, WParam, LParam);  
         break;
     }
 
-    return DefWindowProc(Window, Message, WParam, LParam);  
 }
 
 void PaintBitmap(int Xoffset, int Yoffset)
@@ -133,5 +157,3 @@ struct my_rect GetRect(HWND Window)
     Rect.Height = ClientRect.bottom;
     return Rect;
 }
-
-
