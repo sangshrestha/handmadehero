@@ -110,6 +110,18 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
         {
             Yoffset++;
         }
+        else if (WParam == 'S')
+        {
+            Yoffset--;
+        }
+        else if (WParam == 'A')
+        {
+            Xoffset--;
+        }
+        else if (WParam == 'D')
+        {
+            Xoffset++;
+        }
     }
     break;
     case WM_PAINT: 
