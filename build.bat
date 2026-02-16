@@ -1,3 +1,2 @@
 @echo off
-cc  winmain.c  -o winmain -l gdi32 -l xinput
-winmain
+make winmain.c user32.lib gdi32.lib xinput.lib

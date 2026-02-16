@@ -101,6 +101,18 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
 LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 {
     switch (Message) {
+    case WM_CLOSE:
+    {
+        global_running = 0;
+        PostQuitMessage(0);
+    } 
+    break;
+    case WM_DESTROY:
+    {
+        global_running = 0;
+        PostQuitMessage(0);
+    } 
+    break;
     case WM_SYSKEYDOWN:
     case WM_SYSKEYUP:
     case WM_KEYDOWN:
@@ -108,19 +120,19 @@ LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARA
     {
         if (WParam == 'W')
         {
-            Yoffset++;
+            Yoffset+=2;
         }
         else if (WParam == 'S')
         {
-            Yoffset--;
+            Yoffset-=2;
         }
         else if (WParam == 'A')
         {
-            Xoffset--;
+            Xoffset-=2;
         }
         else if (WParam == 'D')
         {
-            Xoffset++;
+            Xoffset+=2;
         }
     }
     break;
@@ -151,8 +163,8 @@ void PaintBitmap(int Xoffset, int Yoffset)
         for (int X = 0; X < global_bitmap.Width; X++)
         {
             uint8_t Red = (uint8_t) X + Xoffset;
-            uint8_t Green = 0;
-            uint8_t Blue = (uint8_t) Y + Yoffset;
+            uint8_t Blue = 0;
+            uint8_t Green = (uint8_t) Y + Yoffset;
 
             *Pixel = Blue | Green << 8 | Red << 16;
             Pixel++;
@@ -169,3 +181,4 @@ struct my_rect GetRect(HWND Window)
     Rect.Height = ClientRect.bottom;
     return Rect;
 }
+
