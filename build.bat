@@ -1,2 +1,3 @@
 @echo off
-make winmain.c user32.lib gdi32.lib xinput.lib
+gcc -g -O0 winmain.c -o winmain.exe -luser32 -lgdi32 -lxinput
+winmain
