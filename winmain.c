@@ -5,7 +5,11 @@
 #include <dsound.h>
 
 LRESULT CALLBACK WindowProcedure(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam);
+void InitDirectSound(HWND Window, int32_t SamplesPerSec, int32_t BufferSize);
 void PaintBitmap(int Xoffset, int Yoffset);
+#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+
 struct my_rect GetRect(HWND Window);
 
 struct my_rect {
@@ -25,57 +29,26 @@ int Xoffset = 0;
 int Yoffset = 0;
 struct my_bitmap global_bitmap;
 
-#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
-typedef DIRECT_SOUND_CREATE(direct_sound_create);
+// Sound stuff
+#define SamplesPerSecond 48000
+#define ToneHz 256
+#define SquareWavePeriod (SamplesPerSecond / ToneHz)
+#define HalfSquareWavePeriod (SquareWavePeriod / 2)
+#define BytesPerSample (sizeof(int16_t)*2)
+#define SecondaryBufferSize (SamplesPerSecond * BytesPerSample)
+int16_t ToneVolume = 2000;
+uint32_t RunningSampleIndex = 0;
+LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
+int SoundIsPlaying = 0;
 
-void InitDirectSound(HWND Window, int32_t SamplesPerSecond, int32_t BufferSize) {
-  HMODULE DirectSoundLibrary = LoadLibraryA("dsound.dll");
-
-  if (DirectSoundLibrary)
-  {
-    direct_sound_create *DirectSoundCreate = (direct_sound_create *) GetProcAddress(DirectSoundLibrary, "DirectSoundCreate");
-
-    LPDIRECTSOUND DirectSound;
-    if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0))) {
-      WAVEFORMATEX WaveFormat;
-      WaveFormat.wFormatTag = WAVE_FORMAT_PCM;
-      WaveFormat.nChannels = 2;
-      WaveFormat.wBitsPerSample = 16;
-      WaveFormat.nSamplesPerSec = SamplesPerSecond;
-      WaveFormat.nBlockAlign = (WaveFormat.nChannels * WaveFormat.wBitsPerSample)/8;
-      WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign;
-      WaveFormat.cbSize = 0;
-
-      if (SUCCEEDED(DirectSound->lpVtbl->SetCooperativeLevel(DirectSound, Window, DSSCL_PRIORITY))) 
-      {
-        DSBUFFERDESC BufferDescription = {0};
-        BufferDescription.dwSize = sizeof(BufferDescription);
-        BufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
-
-        LPDIRECTSOUNDBUFFER PrimaryBuffer;
-
-        if (SUCCEEDED(DirectSound->lpVtbl->CreateSoundBuffer(DirectSound, &BufferDescription, &PrimaryBuffer, 0)))
-        {
-          if (SUCCEEDED(PrimaryBuffer->lpVtbl->SetFormat(PrimaryBuffer, &WaveFormat)))
-          {
-            printf("primary buffer format set\n");
-          }
-        }
-      }
-
-      DSBUFFERDESC BufferDescription = {0};
-      BufferDescription.dwSize = sizeof(BufferDescription);
-      BufferDescription.dwBufferBytes = BufferSize;
-      BufferDescription.lpwfxFormat = &WaveFormat;
-
-      LPDIRECTSOUNDBUFFER SecondaryBuffer;
-
-      if (SUCCEEDED(DirectSound->lpVtbl->CreateSoundBuffer(DirectSound, &BufferDescription, &SecondaryBuffer, 0)))
-      {
-         printf("secondary buffer set\n");
-      }
-    }
-  }
+struct my_rect GetRect(HWND Window)
+{
+  struct my_rect Rect;
+  RECT ClientRect;
+  GetClientRect(Window, &ClientRect);
+  Rect.Width = ClientRect.right;
+  Rect.Height = ClientRect.bottom;
+  return Rect;
 }
 
 // Entry point
@@ -86,6 +59,10 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
   WindowClass.lpfnWndProc = WindowProcedure;
   WindowClass.hInstance = Instance;
   WindowClass.lpszClassName = "WinMainClass";
+
+  LARGE_INTEGER PerfCountFrequencyResult;
+  QueryPerformanceFrequency(&PerfCountFrequencyResult);
+  uint64_t PerfCountFrequency = PerfCountFrequencyResult.QuadPart;
 
   if (RegisterClass(&WindowClass))
   {
@@ -101,7 +78,13 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
         VirtualFree(global_bitmap.Memory, 0, MEM_RELEASE);
       }
 
-      InitDirectSound(Window, 48000, 48000*sizeof(int16_t)*2);
+      InitDirectSound(Window, SamplesPerSecond, SecondaryBufferSize);
+
+      if (!SoundIsPlaying)
+      {
+        GlobalSecondaryBuffer->lpVtbl->Play(GlobalSecondaryBuffer, 0, 0, DSBPLAY_LOOPING);
+        SoundIsPlaying = 1;
+      }
 
       global_bitmap.Height = 720;
       global_bitmap.Width = 1280;
@@ -115,10 +98,15 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
       
       global_bitmap.Memory = VirtualAlloc(0, global_bitmap.Width * global_bitmap.Height * 4, MEM_COMMIT, PAGE_READWRITE);
 
+      // performance counter
+      LARGE_INTEGER LastCounter;
+      QueryPerformanceCounter(&LastCounter);
 
       while (global_running)
       {
+
         MSG Message;
+
         while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
         {
           TranslateMessage(&Message);
@@ -144,10 +132,85 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, 
         }
         struct my_rect Rect = GetRect(Window);
 
+        // Sound
+        DWORD PlayCursor;
+        DWORD WriteCursor;
+
+        if (SUCCEEDED(GlobalSecondaryBuffer->lpVtbl->GetCurrentPosition(GlobalSecondaryBuffer, &PlayCursor, &WriteCursor)))
+        {
+          DWORD ByteToLock = RunningSampleIndex * BytesPerSample % SecondaryBufferSize;
+          DWORD BytesToWrite;
+
+          if (ByteToLock == PlayCursor) 
+          {
+            if (!SoundIsPlaying)
+            {
+              BytesToWrite = SecondaryBufferSize;
+            }
+            else
+            {
+              BytesToWrite = 0;
+            }
+          }
+          else if (ByteToLock > PlayCursor)
+          {
+            BytesToWrite = SecondaryBufferSize - ByteToLock;
+            BytesToWrite += PlayCursor;
+          }
+          else
+          {
+            BytesToWrite = PlayCursor - ByteToLock;
+          }
+
+          VOID *Region1;
+          DWORD Region1Size;
+          VOID *Region2;
+          DWORD Region2Size;
+
+          if (SUCCEEDED(GlobalSecondaryBuffer->lpVtbl->Lock(GlobalSecondaryBuffer, ByteToLock, BytesToWrite, &Region1, &Region1Size, &Region2, &Region2Size, 0)))
+          {
+            int16_t *SampleOut = (int16_t *)Region1;
+            DWORD Region1SampleCount = Region1Size/BytesPerSample;
+            DWORD Region2SampleCount = Region2Size/BytesPerSample;
+
+            for(DWORD SampleIndex = 0; SampleIndex < Region1SampleCount; ++SampleIndex)
+            {
+              int16_t SampleValue = ((RunningSampleIndex++ / HalfSquareWavePeriod) % 2) ? ToneVolume : -ToneVolume;
+              *SampleOut++ = SampleValue;
+              *SampleOut++ = SampleValue;
+            }
+
+            SampleOut = (int16_t *)Region2;
+            for(DWORD SampleIndex = 0; SampleIndex < Region2SampleCount; ++SampleIndex)
+            {
+              int16_t SampleValue = ((RunningSampleIndex++ / HalfSquareWavePeriod) % 2) ? ToneVolume : -ToneVolume;
+              *SampleOut++ = SampleValue;
+              *SampleOut++ = SampleValue;
+            }
+
+            GlobalSecondaryBuffer->lpVtbl->Unlock(GlobalSecondaryBuffer, Region1, Region1Size, Region2, Region2Size);
+          }
+
+          
+        }
+
         HDC DeviceContext = GetDC(Window);
         PaintBitmap(Xoffset, Yoffset);
         StretchDIBits(DeviceContext, 0, 0, Rect.Width, Rect.Height, 0, 0, global_bitmap.Width, global_bitmap.Height, global_bitmap.Memory, &global_bitmap.Info, DIB_RGB_COLORS, SRCCOPY);
         ReleaseDC(Window, DeviceContext);
+
+
+        // perf counter end
+        LARGE_INTEGER EndCounter;
+        QueryPerformanceCounter(&EndCounter);
+
+        uint64_t CounterElapsed = EndCounter.QuadPart - LastCounter.QuadPart;
+        uint32_t MSPerFrame = (1000 * CounterElapsed) / PerfCountFrequency;
+
+        char Buffer[256];
+        printf("%dms\n", MSPerFrame);
+
+        LastCounter = EndCounter;
       }
     }
   }
@@ -229,13 +292,54 @@ void PaintBitmap(int Xoffset, int Yoffset)
   }
 }
 
-struct my_rect GetRect(HWND Window)
+void InitDirectSound(HWND Window, int32_t SamplesPerSec, int32_t BufferSize) 
 {
-  struct my_rect Rect;
-  RECT ClientRect;
-  GetClientRect(Window, &ClientRect);
-  Rect.Width = ClientRect.right;
-  Rect.Height = ClientRect.bottom;
-  return Rect;
+  HMODULE DirectSoundLibrary = LoadLibraryA("dsound.dll");
+
+  if (DirectSoundLibrary)
+  {
+    direct_sound_create *DirectSoundCreate = (direct_sound_create *) GetProcAddress(DirectSoundLibrary, "DirectSoundCreate");
+
+    LPDIRECTSOUND DirectSound;
+    if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0))) {
+      WAVEFORMATEX WaveFormat;
+      WaveFormat.wFormatTag = WAVE_FORMAT_PCM;
+      WaveFormat.nChannels = 2;
+      WaveFormat.wBitsPerSample = 16;
+      WaveFormat.nSamplesPerSec = SamplesPerSecond;
+      WaveFormat.nBlockAlign = (WaveFormat.nChannels * WaveFormat.wBitsPerSample)/8;
+      WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign;
+      WaveFormat.cbSize = 0;
+
+      if (SUCCEEDED(DirectSound->lpVtbl->SetCooperativeLevel(DirectSound, Window, DSSCL_PRIORITY))) 
+      {
+        DSBUFFERDESC BufferDescription = {0};
+        BufferDescription.dwSize = sizeof(BufferDescription);
+        BufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
+
+        LPDIRECTSOUNDBUFFER PrimaryBuffer;
+
+        if (SUCCEEDED(DirectSound->lpVtbl->CreateSoundBuffer(DirectSound, &BufferDescription, &PrimaryBuffer, 0)))
+        {
+          if (SUCCEEDED(PrimaryBuffer->lpVtbl->SetFormat(PrimaryBuffer, &WaveFormat)))
+          {
+            printf("primary buffer format set\n");
+          }
+        }
+      }
+
+      DSBUFFERDESC BufferDescription = {0};
+      BufferDescription.dwSize = sizeof(BufferDescription);
+      BufferDescription.dwBufferBytes = BufferSize;
+      BufferDescription.lpwfxFormat = &WaveFormat;
+
+
+      if (SUCCEEDED(DirectSound->lpVtbl->CreateSoundBuffer(DirectSound, &BufferDescription, &GlobalSecondaryBuffer, 0)))
+      {
+         printf("secondary buffer set\n");
+      }
+    }
+  }
 }
+
 
